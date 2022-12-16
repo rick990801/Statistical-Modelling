@@ -1,0 +1,150 @@
+---
+title: "Stats 330 A4"
+author: "Richard Choi"
+date: "Due Date: 12pm Friday 25 October"
+output: word_document
+---
+
+install.packages("mgcv")
+install.packages("MuMIn")
+install.packages("crossval")
+install.packages("pROC")
+
+# Question 1
+# Create a data frame heart.df that contains the data from the file heart.data. Make sure each of the variables has been specified as the appropriate class. Include the output from the str(heart.df) and summary(heart.df) in your answer.
+
+```{r}
+data <- read.table("heart.txt")
+factor_columns = c("sex", "cp", "fbs", "restecg", "exang", "num")
+heart.df <- as.data.frame(data)
+heart.df[, factor_columns] <- lapply(heart.df[, factor_columns], as.factor)
+
+str(heart.df)
+summary(heart.df)
+head(heart.df, 10)
+```
+
+# Question 2
+# For each explanatory variable, create a suitable plot that explores the relationship between that variable and the response. Briefly comment on these plots.
+```{r}
+plot(num ~ age, data = heart.df)
+plot(num ~ sex, data = heart.df)
+plot(num ~ cp, data = heart.df)
+plot(num ~ trestbps, data = heart.df)
+plot(num ~ chol, data= heart.df)
+plot(num ~ fbs, data = heart.df)
+plot(num ~ restecg, data = heart.df)
+plot(num ~ thalach, data = heart.df)
+plot(num ~ exang, data = heart.df)
+plot(num ~ oldpeak, data = heart.df)
+
+```
+We observe that the relationship between age and num variable to be generally decreasing.
+We observe that female diagnosed with no heart disease is more than the male. 
+We observe that people with chest pain type 2, type 3, type 1, type 4 to be diagnosed with no heart disease most respsectively.
+We observe that the people with trestbps of 100 to 130 tend to have least heart disease diagnosis. 
+We observe that higher the cholestrol (in mg/dl), proportion of people with diagnosis of present heart disease decreases.
+We observe that there are higher proportion of diagnosis of absent heart disease when people's fasting blood sugar is under 120 mg/dl.
+We observe that the people showing left ventricular hypertrophy have higher proportion of diagnosis of absent heart disease. Whereas people with normal resting electrocardiographic result and wave abnormality result have around the similar proportion of diagnosis of absent heart disease, 0.6.
+We observe that the higher the maximum heart rate achieved by the person, the person tend to have a higher chance of diagnosed with absent heart disease.
+We observe that around 80% people who experienced angina is diagnosed with present heart disease, whereas 20% people who expereienced angina is diagnosed with absent heart disease. 
+We observe that higher the depression induced by exercise relative to rest, the lower the diagnosis with absent heart disease.
+
+# Question 3
+# Fit an initial model that relates the response to the regressors and do diagnostics. Adjust your model as appropriate.
+```{r}
+library(mgcv)
+continuous_columns = c("age", "trestbps", "chol", "thalach", "oldpeak")
+heart_model <- glm(num ~ age + sex + cp + trestbps + chol + fbs + restecg + thalach + exang + oldpeak, family = "binomial", data = heart.df)
+plot(heart_model, which = 1)
+plot(heart_model, which = 2)
+plot(heart_model, which = 3)
+plot(heart_model, which = 4)
+
+summary(heart_model)
+
+gam.fit <- gam(num ~ s(age) + s(trestbps) + s(chol) + s(thalach) + s(oldpeak), family = "binomial", data = heart.df)
+plot(gam.fit)
+
+poly_heart_model <- glm(num ~ age + sex + cp + trestbps + chol + I(chol^2) + fbs + thalach + exang + oldpeak, family = "binomial", data = heart.df)
+anova(heart_model, poly_heart_model, test = "Chisq")
+
+adj_heart_model <- glm(num ~ age + sex + cp  + chol + fbs + thalach + exang + oldpeak, family = "binomial", data = heart.df)
+summary(adj_heart_model)
+1 - pchisq(185.51, 250)
+plot(adj_heart_model, which = 1)
+plot(adj_heart_model, which = 2)
+plot(adj_heart_model, which = 3)
+plot(adj_heart_model, which = 4)
+
+```
+I have fitted a binomial model with all the explanatory variables in heart data, I have fitted gam plot to consider polynomial term in any of the numeric explanatory variables. Gam plot suggested quadratic term for the cholestrol variable however the anova test provided evidence that we do not need quadratic term. I've also excluded trestbps and restecg as they weren't statistically significant (p - value = 0.89, p - value = 0.46 respectively). The trestbps and num plot showed similar proportion of diagnosis of absent heart disease regardless of trestbps (mm Hg). Similarly, restecg and num plot showed almost the same proportion of diagnosis of absent heart disease whether people had normal ectrocardiographic result or wave abnormality result. Although, people with left ventricular hypertrophy showed a significant proportion of absent heart disease, the sample of people with the resut is too low. Both the heart model and adjusted heart model's diagnostic plots were similar and both were ok. For both of the models, the cooks model had several observations that was over 0.04 so further invstigation is required 
+
+
+# Question 4
+# Use dredge to produce a "short list" of promising models.
+```{r}
+library(MuMIn)
+options(na.action = "na.fail")
+
+all.fits <- dredge(adj_heart_model)
+head(all.fits)
+
+all.fits_2 <- dredge(heart_model, rank = "BIC")
+head(all.fits_2)
+first.model <- get.models(all.fits, 1)[[1]]
+summary(first.model)
+
+```
+
+# Question 5 
+# Evaluate the top models from your short list using cross validation and choose a predictive model. Explain your choice.
+```{r}
+library("crossval")
+library("pROC")
+set.seed(12345)
+
+predfun.lm <- function(train.x, train.y, test.x, test.y) {
+  lm.fit <- glm(train.y ~ chol + cp + exang + fbs + oldpeak + sex, family = "binomial", data = train.x)
+  ynew <- predict(lm.fit, newdata = test.x, type = "response")
+  my.roc = roc(response = test.y, predictor = ynew)
+  out <- my.roc$auc 
+  
+  lm.fit2 <- glm(train.y ~ cp + exang + fbs + oldpeak + sex, family = "binomial", data = train.x)
+  ynew <- predict(lm.fit2, newdata = test.x, type = "response")
+  out2 <- roc(response = test.y, predictor = ynew)$auc
+  
+  lm.fit3 <- glm(train.y ~ chol + cp + exang + fbs + oldpeak + sex + thalach, family = "binomial", data = train.x)
+  ynew <- predict(lm.fit3, newdata = test.x, type = "response")
+  out3 <- roc(response = test.y, predictor = ynew)$auc
+  
+  lm.fit4 <- glm(train.y ~ chol + cp + fbs + oldpeak + sex, family = "binomial", data = train.x)
+  ynew <- predict(lm.fit4, newdata = test.x, type = "response")
+  out4 <- roc(response = test.y, predictor = ynew)$auc
+  
+  lm.fit5 <- glm(train.y ~ age + chol + cp + exang + fbs + oldpeak + sex, family = "binomial", data = train.x)
+  ynew <- predict(lm.fit5, newdata = test.x, type = "response")
+  out5 <- roc(response = test.y, predictor = ynew)$auc
+  
+  lm.fit6 <- glm(train.y ~ chol + cp + exang + oldpeak + sex, family = "binomial", data = train.x)
+  ynew <- predict(lm.fit6, newdata = test.x, type = "response")
+  out6 <- roc(response = test.y, predictor = ynew)$auc
+  return(c(out, out2, out3, out4, out5, out6))
+}
+cv.out <- crossval(predfun.lm, X  = heart.df[, 1:10], Y = heart.df[, 11], K = 10, B = 10, verbose = FALSE)
+
+round(cv.out$stat, 4)
+round(cv.out$stat.se, 4)
+```
+I've used dredge function to get the top 6 best model using AICc rank, because BIC rank seemed to prefer models with significantly less variables which omitted variables like chol and exang. Using 100 fold cross validation on the top 6 models, we've attained the highest estimate of AUC (0.9839) which orresponds to model 1 from the AICc list. 
+
+# Question 6
+# Produce the ROC curve for the model you chose. Comment on the model's predictive ability. Find the value of the threshold c that maximizes sensitivity + specificity.
+```{r}
+best.pred.model <- glm(num ~ chol + cp + exang + fbs + oldpeak + sex, family = "binomial", data = heart.df)
+
+heart.roc = roc(response = heart.df$num, predictor = fitted.values(best.pred.model), ci = TRUE)
+plot(heart.roc, col = "blue", print.auc = TRUE, auc.polygon = TRUE, max.auc.polygon = TRUE, auc.polygoncol = 'yellow', grid = TRUE, lwd = 2.5, print.thres.cex = 0.5)
+
+```
+The c value is 0.915 (0.881 ~ 0.948). It maximises sensitiy + specificity 
